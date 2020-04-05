@@ -34,9 +34,10 @@ import org.json.simple.parser.JSONParser;
 
 public class YTNotify {
     //TODO: Hold on to the previous updates between runs.
-    //TODO: Comment everything.
+    //TODO: Add search feature.
 
     final int MAXMEM = 20; //Maximum amount of updates saved.
+    final String NOVIDS = "£No new video£"; //No videos in channel.
 
     final int GETVID = 0;
     final int FINDNAME = 1;
@@ -173,15 +174,22 @@ public class YTNotify {
                     break forloop;
                 }
                 if (json.get("error") != null) {
-                    trayIcon.displayMessage("Error!", "YouTube returned an error! Did you reach your quota?",
+                    trayIcon.displayMessage("Error!", "YouTube returned an error reaching " + pos.name + "! Did you reach your quota?",
                             MessageType.ERROR);
                     break forloop;
                 }
-                JSONObject vid = (JSONObject)((JSONArray)json.get("items")).get(0);
-                JSONObject snip = (JSONObject)vid.get("snippet");
-                JSONObject rid = (JSONObject)snip.get("resourceId");
-                String vidid = (String)rid.get("videoId");
-                String title = (String)snip.get("title");
+                String title;
+                String vidid = null;
+                JSONArray items = (JSONArray)json.get("items");
+                if(items.size() == 0) {
+                    title = NOVIDS;
+                } else {
+                    JSONObject vid = (JSONObject)items.get(0);
+                    JSONObject snip = (JSONObject)vid.get("snippet");
+                    JSONObject rid = (JSONObject)snip.get("resourceId");
+                    vidid = (String)rid.get("videoId");
+                    title = (String)snip.get("title");
+                }
 
                 //Update found!
                 if (!title.equals(pos.lastvid)) {
@@ -352,14 +360,17 @@ public class YTNotify {
         JSONObject rp = (JSONObject)cd.get("relatedPlaylists");
         newdata.ulid = (String)rp.get("uploads");
         JSONObject json = getYTJSON(newdata.ulid, GETVID);
-        if(json == null || ((JSONArray)json.get("items")).size() == 0) {
-            //TODO: Create special case allowing for empty channels.
+        if(json == null) {
             JOptionPane.showMessageDialog(null, "YouTube returned an error! Did you type something wrong?", "Error!", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        JSONObject vid = (JSONObject)((JSONArray)json.get("items")).get(0);
-        JSONObject snip = (JSONObject)vid.get("snippet");
-        newdata.lastvid = (String)snip.get("title");
+        if(((JSONArray)json.get("items")).size() == 0) {
+            newdata.lastvid = NOVIDS;
+        } else {
+            JSONObject vid = (JSONObject)((JSONArray)json.get("items")).get(0);
+            JSONObject snip = (JSONObject)vid.get("snippet");
+            newdata.lastvid = (String)snip.get("title");
+        }
         data.add(newdata);
         saveData();
     }
