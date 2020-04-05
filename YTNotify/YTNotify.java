@@ -23,7 +23,6 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
-import java.util.Map;
 import java.util.Scanner;
 
 import javax.imageio.ImageIO;
@@ -33,12 +32,11 @@ import javax.swing.JOptionPane;
 import org.json.simple.*;
 import org.json.simple.parser.JSONParser;
 
-class YTNotify {
-    //TODO: Fix all the "Map" warnings.
+public class YTNotify {
     //TODO: Hold on to the previous updates between runs.
     //TODO: Comment everything.
 
-    final int MAXMEM = 20;
+    final int MAXMEM = 20; //Maximum amount of updates saved.
 
     final int GETVID = 0;
     final int FINDNAME = 1;
@@ -54,6 +52,7 @@ class YTNotify {
     boolean running = true;
 
     YTNotify() {
+        //Load data from files.
         try {
             Scanner scn = new Scanner(new File("key.txt"));
             apikey = scn.nextLine();
@@ -80,8 +79,11 @@ class YTNotify {
                 data.add(newdata);
             }
         } catch (Exception e) {
+            //The data file hasn't been created yet. Just ignore.
+            //Or, some file system error happened, in which case there's not much the program can do, anyways.
         }
 
+        //Initialize the tray icon.
         tray = SystemTray.getSystemTray();
         PopupMenu popup = new PopupMenu();
         Image img = Toolkit.getDefaultToolkit().getImage("NotifyICO.png");
@@ -89,11 +91,13 @@ class YTNotify {
         trayIcon.setActionCommand("YTNotify");
         trayIcon.setImageAutoSize(true);
 
+        //Initialize the update memory.
         linkmem = new String[MAXMEM];
         memids = new String[MAXMEM];
         memnames = new String[MAXMEM];
         linkbtns = new MenuItem[MAXMEM];
 
+        //Initialize the memory buttons.
         Menu memmenu = new Menu("Recent updates");
         for (int i = 0; i < MAXMEM; i++) {
             linkbtns[i] = new MenuItem((i + 1) + ": None");
@@ -119,6 +123,7 @@ class YTNotify {
             memmenu.add(linkbtns[i]);
         }
 
+        //Initialize the other buttons.
         MenuItem itemAdd = new MenuItem("Add by Name");
         itemAdd.addActionListener(new ActionListener() {
             @Override
@@ -133,9 +138,6 @@ class YTNotify {
                 addChannel(true);
             }
         });
-        popup.add(memmenu);
-        popup.add(itemAdd);
-        popup.add(itemAddID);
         MenuItem itemEnd = new MenuItem("End Program");
         itemEnd.addActionListener(new ActionListener() {
             @Override
@@ -143,6 +145,11 @@ class YTNotify {
                 running = false;
             }
         });
+
+        //Add everything to the tray.
+        popup.add(memmenu);
+        popup.add(itemAdd);
+        popup.add(itemAddID);
         popup.add(itemEnd);
         trayIcon.setPopupMenu(popup);
         try {
@@ -151,10 +158,13 @@ class YTNotify {
             e.printStackTrace();
             running = false;
         }
+
+        //Main loop
         while (running) {
             forloop: for (int i = 0; i < data.size(); i++) {
                 stack = 0;
 
+                //Check for updates.
                 DataNode pos = data.get(i);
                 JSONObject json = getYTJSON(pos.ulid, GETVID);
                 if (json == null) {
@@ -167,12 +177,13 @@ class YTNotify {
                             MessageType.ERROR);
                     break forloop;
                 }
-                Map vid = (Map) ((JSONArray) json.get("items")).get(0);
-                Map snip = (Map) vid.get("snippet");
-                Map rid = (Map) snip.get("resourceId");
-                // System.out.println(rid == null);
-                String vidid = (String) rid.get("videoId");
-                String title = (String) snip.get("title");
+                JSONObject vid = (JSONObject)((JSONArray)json.get("items")).get(0);
+                JSONObject snip = (JSONObject)vid.get("snippet");
+                JSONObject rid = (JSONObject)snip.get("resourceId");
+                String vidid = (String)rid.get("videoId");
+                String title = (String)snip.get("title");
+
+                //Update found!
                 if (!title.equals(pos.lastvid)) {
                     trayIcon.displayMessage("New video from " + pos.name, title, MessageType.INFO);
                     pos.lastvid = title;
@@ -189,13 +200,13 @@ class YTNotify {
                     saveData();
                 }
                 try {
-                    Thread.sleep(10000);
+                    Thread.sleep(10000); //10 second spacer between each individual channel check.
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             }
             try {
-                Thread.sleep(3600000);
+                Thread.sleep(3600000); //Delay between checks.
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -203,6 +214,7 @@ class YTNotify {
         tray.remove(trayIcon);
     }
 
+    //Reads everything in a Reader to a single String.
     private static String readAll(Reader read) throws IOException {
         StringBuilder sb = new StringBuilder();
         int in = read.read();
@@ -213,6 +225,7 @@ class YTNotify {
         return sb.toString();
     }
 
+    //Gets data from the API and converts it into a JSON object.
     private JSONObject getYTJSON(String input, int type) {
         JSONObject json = null;
         InputStream is = null;
@@ -262,6 +275,7 @@ class YTNotify {
         return json;
     }
 
+    //Writes the internal array of data to a file.
     void saveData() {
         try {
             BufferedWriter writer = new BufferedWriter(new FileWriter(new File("data.txt")));
@@ -277,7 +291,9 @@ class YTNotify {
         }
     }
 
+    //Adds a new channel.
     void addChannel(boolean byID) {
+        //Get channel-identifying information.
         JSONObject channeldata = null;
         if(byID) {
             String searchid = JOptionPane.showInputDialog("Channel ID?");
@@ -302,18 +318,20 @@ class YTNotify {
             JOptionPane.showMessageDialog(null, "YouTube returned an error! Did you type something wrong?", "Error!", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        Map res = (Map)channeldata.get("pageInfo");
+
+        //Get and process information from the API.
+        JSONObject res = (JSONObject)channeldata.get("pageInfo");
         long results = (long)res.get("totalResults");
         if (results == 0) {
             JOptionPane.showMessageDialog(null, "No results found!", "Error!", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        Map resone = (Map)((JSONArray) channeldata.get("items")).get(0);
-        Map snippet = (Map)(resone.get("snippet"));
-        Map thumbs = (Map)(snippet.get("thumbnails"));
+        JSONObject resone = (JSONObject)((JSONArray)channeldata.get("items")).get(0);
+        JSONObject snippet = (JSONObject)(resone.get("snippet"));
+        JSONObject thumbs = (JSONObject)(snippet.get("thumbnails"));
         Image thumb = null;
         try {
-            URL url = new URL((String)((Map)thumbs.get("default")).get("url"));
+            URL url = new URL((String)((JSONObject)thumbs.get("default")).get("url"));
             thumb = ImageIO.read(url);
         } catch (Exception e1) {
             e1.printStackTrace();
@@ -330,8 +348,8 @@ class YTNotify {
                 JOptionPane.showMessageDialog(null, "That channel is already being watched!", "Error!", JOptionPane.ERROR_MESSAGE);
             }
         }
-        Map cd = (Map)resone.get("contentDetails");
-        Map rp = (Map)cd.get("relatedPlaylists");
+        JSONObject cd = (JSONObject)resone.get("contentDetails");
+        JSONObject rp = (JSONObject)cd.get("relatedPlaylists");
         newdata.ulid = (String)rp.get("uploads");
         JSONObject json = getYTJSON(newdata.ulid, GETVID);
         if(json == null || ((JSONArray)json.get("items")).size() == 0) {
@@ -339,8 +357,8 @@ class YTNotify {
             JOptionPane.showMessageDialog(null, "YouTube returned an error! Did you type something wrong?", "Error!", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        Map vid = (Map)((JSONArray)json.get("items")).get(0);
-        Map snip = (Map)vid.get("snippet");
+        JSONObject vid = (JSONObject)((JSONArray)json.get("items")).get(0);
+        JSONObject snip = (JSONObject)vid.get("snippet");
         newdata.lastvid = (String)snip.get("title");
         data.add(newdata);
         saveData();

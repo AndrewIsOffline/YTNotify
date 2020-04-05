@@ -1,6 +1,8 @@
 *.class
 *.txt
 *.jar
+*.json
+*.bat
 
 # DEFAULTS
 
