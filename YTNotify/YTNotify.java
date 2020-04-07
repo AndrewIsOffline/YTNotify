@@ -34,14 +34,19 @@ import org.json.simple.parser.JSONParser;
 
 public class YTNotify {
     //TODO: Hold on to the previous updates between runs.
-    //TODO: Add search feature.
+    //TODO: Move settings to separate file.
 
     final int MAXMEM = 20; //Maximum amount of updates saved.
     final String NOVIDS = "£No new video£"; //No videos in channel.
+    final String SAFESEARCH = "none";
+    final int RESULTS = 10;
+    final int SHORTDELAY = 10000;
+    final int LONGDELAY = 3600000;
 
     final int GETVID = 0;
     final int FINDNAME = 1;
     final int FINDID = 2;
+    final int SEARCH = 3;
 
     SystemTray tray;
     ArrayList<DataNode> data;
@@ -139,11 +144,19 @@ public class YTNotify {
                 addChannel(true);
             }
         });
+        MenuItem itemSearch = new MenuItem("Search for Name");
+        itemSearch.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                searchName();
+            }
+        });
         MenuItem itemEnd = new MenuItem("End Program");
         itemEnd.addActionListener(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
                 running = false;
+                Thread.currentThread().interrupt();
             }
         });
 
@@ -151,6 +164,7 @@ public class YTNotify {
         popup.add(memmenu);
         popup.add(itemAdd);
         popup.add(itemAddID);
+        popup.add(itemSearch);
         popup.add(itemEnd);
         trayIcon.setPopupMenu(popup);
         try {
@@ -208,13 +222,13 @@ public class YTNotify {
                     saveData();
                 }
                 try {
-                    Thread.sleep(10000); //10 second spacer between each individual channel check.
+                    Thread.sleep(SHORTDELAY); //Spacer between each individual channel check.
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             }
             try {
-                Thread.sleep(3600000); //Delay between checks.
+                Thread.sleep(LONGDELAY); //Delay between checks.
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -247,6 +261,9 @@ public class YTNotify {
                     break;
                 case FINDID:
                     is = new URL("https://www.googleapis.com/youtube/v3/channels?part=snippet%2CcontentDetails&id=" + input + "&maxResults=1&key=" + apikey).openStream();
+                    break;
+                case SEARCH:
+                    is = new URL("https://www.googleapis.com/youtube/v3/search?part=snippet&q=" + input + "&maxResults=" + RESULTS + "&safeSearch=" + SAFESEARCH + "&type=channel&key=" + apikey).openStream();
                     break;
             }
         } catch (ConnectException e) {
@@ -362,6 +379,97 @@ public class YTNotify {
         JSONObject json = getYTJSON(newdata.ulid, GETVID);
         if(json == null) {
             JOptionPane.showMessageDialog(null, "YouTube returned an error! Did you type something wrong?", "Error!", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if(((JSONArray)json.get("items")).size() == 0) {
+            newdata.lastvid = NOVIDS;
+        } else {
+            JSONObject vid = (JSONObject)((JSONArray)json.get("items")).get(0);
+            JSONObject snip = (JSONObject)vid.get("snippet");
+            newdata.lastvid = (String)snip.get("title");
+        }
+        data.add(newdata);
+        saveData();
+    }
+
+    //Search for a channel.
+    void searchName() {
+        //Get search terms.
+        String searchid = JOptionPane.showInputDialog("Search terms?");
+        if (searchid == null || searchid.trim().equals("")) {
+            JOptionPane.showMessageDialog(null, "No terms entered!", "Error!", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        JSONObject channeldata = getYTJSON(searchid.replace(" ", "%7C"), SEARCH);
+        if(channeldata == null) {
+            JOptionPane.showMessageDialog(null, "YouTube refused request! Did you type something wrong?", "Error!", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if(channeldata.get("error") != null) {
+            JOptionPane.showMessageDialog(null, "YouTube returned an error! Did you type something wrong?", "Error!", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        JSONArray results = (JSONArray)channeldata.get("items");
+        int numresults = results.size();
+        boolean done = false;
+        JSONObject snippet = null;
+        String chname = "";
+
+        //Flip through list of results.
+        for(int i = 0; i < numresults; i++) {
+            snippet = (JSONObject)(((JSONObject)results.get(i)).get("snippet"));
+            JSONObject thumbs = (JSONObject)(snippet.get("thumbnails"));
+            Image thumb = null;
+            try {
+                URL url = new URL((String)((JSONObject)thumbs.get("default")).get("url"));
+                thumb = ImageIO.read(url);
+            } catch (Exception e1) {
+                e1.printStackTrace();
+                return;
+            }
+            chname = (String)snippet.get("title");
+            int ans = JOptionPane.showConfirmDialog(null, "Is it " + chname + "?", "Confirm", JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE, new ImageIcon(thumb));
+            if(ans == JOptionPane.NO_OPTION) continue;
+            if(ans == JOptionPane.YES_OPTION) {
+                done = true;
+                break;
+            }
+            return;
+        }
+        if(!done) return;
+
+        //Get the rest of the data needed.
+        String chid = (String)snippet.get("id");
+        channeldata = getYTJSON(chid, FINDID);
+        if(channeldata == null) {
+            JOptionPane.showMessageDialog(null, "YouTube refused request!", "Error!", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if(channeldata.get("error") != null) {
+            JOptionPane.showMessageDialog(null, "YouTube returned an error!", "Error!", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        JSONObject res = (JSONObject)channeldata.get("pageInfo");
+        if ((long)res.get("totalResults") == 0) {
+            JOptionPane.showMessageDialog(null, "No results found for ID...?", "Error!", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        JSONObject resone = (JSONObject)((JSONArray)channeldata.get("items")).get(0);
+        snippet = (JSONObject)(resone.get("snippet"));
+        DataNode newdata = new DataNode();
+        newdata.name = chname;
+        newdata.id = chid;
+        for(int i = 0; i < data.size(); i++) {
+            if(data.get(i).id.equals(chid)) {
+                JOptionPane.showMessageDialog(null, "That channel is already being watched!", "Error!", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+        JSONObject cd = (JSONObject)resone.get("contentDetails");
+        JSONObject rp = (JSONObject)cd.get("relatedPlaylists");
+        newdata.ulid = (String)rp.get("uploads");
+        JSONObject json = getYTJSON(newdata.ulid, GETVID);
+        if(json == null) {
+            JOptionPane.showMessageDialog(null, "YouTube returned an error!", "Error!", JOptionPane.ERROR_MESSAGE);
             return;
         }
         if(((JSONArray)json.get("items")).size() == 0) {
