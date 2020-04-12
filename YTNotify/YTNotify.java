@@ -33,11 +33,11 @@ import org.json.simple.*;
 import org.json.simple.parser.JSONParser;
 
 public class YTNotify {
-    //TODO: Hold on to the previous updates between runs.
-    //TODO: Move settings to separate file.
+    // TODO: Move settings to separate file.
+    // TODO: Add a delete function.
 
-    final int MAXMEM = 20; //Maximum amount of updates saved.
-    final String NOVIDS = "£No new video£"; //No videos in channel.
+    final int MAXMEM = 20; // Maximum amount of updates saved.
+    final String NOVIDS = "£No new video£"; // No videos in channel.
     final String SAFESEARCH = "none";
     final int RESULTS = 10;
     final int SHORTDELAY = 10000;
@@ -58,7 +58,7 @@ public class YTNotify {
     boolean running = true;
 
     YTNotify() {
-        //Load data from files.
+        // Load data from files.
         try {
             Scanner scn = new Scanner(new File("key.txt"));
             apikey = scn.nextLine();
@@ -72,11 +72,10 @@ public class YTNotify {
         try {
             Scanner file = new Scanner(new File("data.txt"));
             ArrayList<String> rawdata = new ArrayList<String>();
-            while (file.hasNext())
-                rawdata.add(file.nextLine());
+            while(file.hasNext()) rawdata.add(file.nextLine());
             file.close();
 
-            for (int i = 0; i < rawdata.size() / 4; i++) {
+            for(int i = 0; i < rawdata.size() / 4; i++) {
                 DataNode newdata = new DataNode();
                 newdata.name = rawdata.get(i * 4);
                 newdata.id = rawdata.get(i * 4 + 1);
@@ -84,12 +83,32 @@ public class YTNotify {
                 newdata.lastvid = rawdata.get(i * 4 + 3);
                 data.add(newdata);
             }
-        } catch (Exception e) {
-            //The data file hasn't been created yet. Just ignore.
-            //Or, some file system error happened, in which case there's not much the program can do, anyways.
+        } catch(Exception e) {
+            // The data file hasn't been created yet. Just ignore.
+            // Or, some file system error happened, in which case there's not much the
+            // program can do, anyways.
         }
 
-        //Initialize the tray icon.
+        // Initialize the update memory.
+        linkmem = new String[MAXMEM];
+        memids = new String[MAXMEM];
+        memnames = new String[MAXMEM];
+        linkbtns = new MenuItem[MAXMEM];
+
+        try {
+            Scanner file = new Scanner(new File("memory.txt"));
+            ArrayList<String> rawdata = new ArrayList<String>();
+            while(file.hasNext()) rawdata.add(file.nextLine());
+            file.close();
+
+            for(int i = 0; i < rawdata.size() / 3 && i < MAXMEM; i++) {
+                linkmem[i] = rawdata.get(i * 3);
+                memids[i] = rawdata.get(i * 3 + 1);
+                memnames[i] = rawdata.get(i * 3 + 2);
+            }
+        } catch(Exception e) {}
+
+        // Initialize the tray icon.
         tray = SystemTray.getSystemTray();
         PopupMenu popup = new PopupMenu();
         Image img = Toolkit.getDefaultToolkit().getImage("NotifyICO.png");
@@ -97,26 +116,23 @@ public class YTNotify {
         trayIcon.setActionCommand("YTNotify");
         trayIcon.setImageAutoSize(true);
 
-        //Initialize the update memory.
-        linkmem = new String[MAXMEM];
-        memids = new String[MAXMEM];
-        memnames = new String[MAXMEM];
-        linkbtns = new MenuItem[MAXMEM];
-
-        //Initialize the memory buttons.
+        // Initialize the memory buttons.
         Menu memmenu = new Menu("Recent updates");
-        for (int i = 0; i < MAXMEM; i++) {
-            linkbtns[i] = new MenuItem((i + 1) + ": None");
+        for(int i = 0; i < MAXMEM; i++) {
+            if(linkmem[i] == null) {
+                linkbtns[i] = new MenuItem((i + 1) + ": None");
+            } else {
+                linkbtns[i] = new MenuItem((i + 1) + ": " + linkmem[i] + " - " + memnames[i]);
+            }
             linkbtns[i].addActionListener(new ActionListener() {
                 int pos;
 
                 @Override
                 public void actionPerformed(ActionEvent e) {
-                    if (linkmem[pos] == null)
-                        return;
+                    if(linkmem[pos] == null) return;
                     try {
                         Desktop.getDesktop().browse(new URL("https://www.youtube.com/watch?v=" + memids[pos]).toURI());
-                    } catch (Exception e1) {
+                    } catch(Exception e1) {
                         e1.printStackTrace();
                     }
                 }
@@ -129,7 +145,7 @@ public class YTNotify {
             memmenu.add(linkbtns[i]);
         }
 
-        //Initialize the other buttons.
+        // Initialize the other buttons.
         MenuItem itemAdd = new MenuItem("Add by Name");
         itemAdd.addActionListener(new ActionListener() {
             @Override
@@ -160,7 +176,7 @@ public class YTNotify {
             }
         });
 
-        //Add everything to the tray.
+        // Add everything to the tray.
         popup.add(memmenu);
         popup.add(itemAdd);
         popup.add(itemAddID);
@@ -169,27 +185,25 @@ public class YTNotify {
         trayIcon.setPopupMenu(popup);
         try {
             tray.add(trayIcon);
-        } catch (AWTException e) {
+        } catch(AWTException e) {
             e.printStackTrace();
             running = false;
         }
 
-        //Main loop
-        while (running) {
-            forloop: for (int i = 0; i < data.size(); i++) {
+        // Main loop
+        while(running) {
+            forloop: for(int i = 0; i < data.size(); i++) {
                 stack = 0;
 
-                //Check for updates.
+                // Check for updates.
                 DataNode pos = data.get(i);
                 JSONObject json = getYTJSON(pos.ulid, GETVID);
-                if (json == null) {
-                    trayIcon.displayMessage("Error!", "YouTube refused last request! Did you reach your quota?",
-                            MessageType.ERROR);
+                if(json == null) {
+                    trayIcon.displayMessage("Error!", "YouTube refused last request! Did you reach your quota?", MessageType.ERROR);
                     break forloop;
                 }
-                if (json.get("error") != null) {
-                    trayIcon.displayMessage("Error!", "YouTube returned an error reaching " + pos.name + "! Did you reach your quota?",
-                            MessageType.ERROR);
+                if(json.get("error") != null) {
+                    trayIcon.displayMessage("Error!", "YouTube returned an error reaching " + pos.name + "! Did you reach your quota?", MessageType.ERROR);
                     break forloop;
                 }
                 String title;
@@ -205,11 +219,11 @@ public class YTNotify {
                     title = (String)snip.get("title");
                 }
 
-                //Update found!
-                if (!title.equals(pos.lastvid)) {
+                // Update found!
+                if(!title.equals(pos.lastvid)) {
                     trayIcon.displayMessage("New video from " + pos.name, title, MessageType.INFO);
                     pos.lastvid = title;
-                    for (int j = MAXMEM - 1; j > 0; j--) {
+                    for(int j = MAXMEM - 1; j > 0; j--) {
                         linkmem[j] = linkmem[j - 1];
                         memids[j] = memids[j - 1];
                         memnames[j] = memnames[j - 1];
@@ -220,53 +234,65 @@ public class YTNotify {
                     memnames[0] = pos.name;
                     linkbtns[0].setLabel("1: " + linkmem[0] + " - " + memnames[0]);
                     saveData();
+                    try {
+                        BufferedWriter writer = new BufferedWriter(new FileWriter(new File("memory.txt")));
+                        for(int j = 0; j < MAXMEM; j++) {
+                            if(linkmem[j] == null) break;
+                            writer.write(linkmem[j] + "\n");
+                            writer.write(memids[j] + "\n");
+                            writer.write(memnames[j] + "\n");
+                        }
+                        writer.close();
+                    } catch(IOException e) {
+                        e.printStackTrace();
+                    }
                 }
                 try {
-                    Thread.sleep(SHORTDELAY); //Spacer between each individual channel check.
-                } catch (Exception e) {
+                    Thread.sleep(SHORTDELAY); // Spacer between each individual channel check.
+                } catch(Exception e) {
                     e.printStackTrace();
                 }
             }
             try {
-                Thread.sleep(LONGDELAY); //Delay between checks.
-            } catch (Exception e) {
+                Thread.sleep(LONGDELAY); // Delay between checks.
+            } catch(Exception e) {
                 e.printStackTrace();
             }
         }
         tray.remove(trayIcon);
     }
 
-    //Reads everything in a Reader to a single String.
+    // Reads everything in a Reader to a single String.
     private static String readAll(Reader read) throws IOException {
         StringBuilder sb = new StringBuilder();
         int in = read.read();
-        while (in != -1) {
-            sb.append((char) in);
+        while(in != -1) {
+            sb.append((char)in);
             in = read.read();
         }
         return sb.toString();
     }
 
-    //Gets data from the API and converts it into a JSON object.
+    // Gets data from the API and converts it into a JSON object.
     private JSONObject getYTJSON(String input, int type) {
         JSONObject json = null;
         InputStream is = null;
         try {
-            switch (type) {
-                case GETVID:
-                    is = new URL("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=" + input + "&maxResults=1&key=" + apikey).openStream();
-                    break;
-                case FINDNAME:
-                    is = new URL("https://www.googleapis.com/youtube/v3/channels?part=snippet%2CcontentDetails&forUsername=" + input + "&maxResults=1&key=" + apikey).openStream();
-                    break;
-                case FINDID:
-                    is = new URL("https://www.googleapis.com/youtube/v3/channels?part=snippet%2CcontentDetails&id=" + input + "&maxResults=1&key=" + apikey).openStream();
-                    break;
-                case SEARCH:
-                    is = new URL("https://www.googleapis.com/youtube/v3/search?part=snippet&q=" + input + "&maxResults=" + RESULTS + "&safeSearch=" + SAFESEARCH + "&type=channel&key=" + apikey).openStream();
-                    break;
+            switch(type) {
+            case GETVID:
+                is = new URL("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=" + input + "&maxResults=1&key=" + apikey).openStream();
+                break;
+            case FINDNAME:
+                is = new URL("https://www.googleapis.com/youtube/v3/channels?part=snippet%2CcontentDetails&forUsername=" + input + "&maxResults=1&key=" + apikey).openStream();
+                break;
+            case FINDID:
+                is = new URL("https://www.googleapis.com/youtube/v3/channels?part=snippet%2CcontentDetails&id=" + input + "&maxResults=1&key=" + apikey).openStream();
+                break;
+            case SEARCH:
+                is = new URL("https://www.googleapis.com/youtube/v3/search?part=snippet&q=" + input + "&maxResults=" + RESULTS + "&safeSearch=" + SAFESEARCH + "&type=channel&key=" + apikey).openStream();
+                break;
             }
-        } catch (ConnectException e) {
+        } catch(ConnectException e) {
             if(e.getMessage().indexOf("timed out") > -1 && stack < 5) {
                 stack++;
                 return getYTJSON(input, type);
@@ -274,11 +300,11 @@ public class YTNotify {
             System.out.println("HTTP Error! Malformed request? Quota reached?");
             e.printStackTrace();
             return null;
-        } catch (MalformedURLException e) {
+        } catch(MalformedURLException e) {
             System.out.println("HTTP Error! Malformed request? Quota reached?");
             e.printStackTrace();
             return null;
-        } catch (IOException e) {
+        } catch(IOException e) {
             System.out.println("HTTP Error! Malformed request? Quota reached?");
             e.printStackTrace();
             return null;
@@ -287,20 +313,20 @@ public class YTNotify {
             BufferedReader rd = new BufferedReader(new InputStreamReader(is, Charset.forName("UTF-8")));
             String jsonText = readAll(rd);
             json = (JSONObject)new JSONParser().parse(jsonText);
-            //System.out.println(json.toString());
-        } catch (Exception e) {
+            // System.out.println(json.toString());
+        } catch(Exception e) {
             e.printStackTrace();
         } finally {
             try {
                 is.close();
-            } catch (Exception e) {
+            } catch(Exception e) {
                 e.printStackTrace();
             }
         }
         return json;
     }
 
-    //Writes the internal array of data to a file.
+    // Writes the internal array of data to a file.
     void saveData() {
         try {
             BufferedWriter writer = new BufferedWriter(new FileWriter(new File("data.txt")));
@@ -311,25 +337,25 @@ public class YTNotify {
                 writer.write(data.get(i).lastvid + "\n");
             }
             writer.close();
-        } catch (IOException e) {
+        } catch(IOException e) {
             e.printStackTrace();
         }
     }
 
-    //Adds a new channel.
+    // Adds a new channel.
     void addChannel(boolean byID) {
-        //Get channel-identifying information.
+        // Get channel-identifying information.
         JSONObject channeldata = null;
         if(byID) {
             String searchid = JOptionPane.showInputDialog("Channel ID?");
-            if (searchid == null || searchid.trim().equals("")) {
+            if(searchid == null || searchid.trim().equals("")) {
                 JOptionPane.showMessageDialog(null, "No ID entered!", "Error!", JOptionPane.ERROR_MESSAGE);
                 return;
             }
             channeldata = getYTJSON(searchid, FINDID);
         } else {
             String searchname = JOptionPane.showInputDialog("Channel name?");
-            if (searchname == null || searchname.trim().equals("")) {
+            if(searchname == null || searchname.trim().equals("")) {
                 JOptionPane.showMessageDialog(null, "No name entered!", "Error!", JOptionPane.ERROR_MESSAGE);
                 return;
             }
@@ -344,10 +370,10 @@ public class YTNotify {
             return;
         }
 
-        //Get and process information from the API.
+        // Get and process information from the API.
         JSONObject res = (JSONObject)channeldata.get("pageInfo");
         long results = (long)res.get("totalResults");
-        if (results == 0) {
+        if(results == 0) {
             JOptionPane.showMessageDialog(null, "No results found!", "Error!", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -358,7 +384,7 @@ public class YTNotify {
         try {
             URL url = new URL((String)((JSONObject)thumbs.get("default")).get("url"));
             thumb = ImageIO.read(url);
-        } catch (Exception e1) {
+        } catch(Exception e1) {
             e1.printStackTrace();
             return;
         }
@@ -392,11 +418,11 @@ public class YTNotify {
         saveData();
     }
 
-    //Search for a channel.
+    // Search for a channel.
     void searchName() {
-        //Get search terms.
+        // Get search terms.
         String searchid = JOptionPane.showInputDialog("Search terms?");
-        if (searchid == null || searchid.trim().equals("")) {
+        if(searchid == null || searchid.trim().equals("")) {
             JOptionPane.showMessageDialog(null, "No terms entered!", "Error!", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -415,7 +441,7 @@ public class YTNotify {
         JSONObject snippet = null;
         String chname = "";
 
-        //Flip through list of results.
+        // Flip through list of results.
         for(int i = 0; i < numresults; i++) {
             snippet = (JSONObject)(((JSONObject)results.get(i)).get("snippet"));
             JSONObject thumbs = (JSONObject)(snippet.get("thumbnails"));
@@ -423,7 +449,7 @@ public class YTNotify {
             try {
                 URL url = new URL((String)((JSONObject)thumbs.get("default")).get("url"));
                 thumb = ImageIO.read(url);
-            } catch (Exception e1) {
+            } catch(Exception e1) {
                 e1.printStackTrace();
                 return;
             }
@@ -438,7 +464,7 @@ public class YTNotify {
         }
         if(!done) return;
 
-        //Get the rest of the data needed.
+        // Get the rest of the data needed.
         String chid = (String)snippet.get("id");
         channeldata = getYTJSON(chid, FINDID);
         if(channeldata == null) {
@@ -450,7 +476,7 @@ public class YTNotify {
             return;
         }
         JSONObject res = (JSONObject)channeldata.get("pageInfo");
-        if ((long)res.get("totalResults") == 0) {
+        if((long)res.get("totalResults") == 0) {
             JOptionPane.showMessageDialog(null, "No results found for ID...?", "Error!", JOptionPane.ERROR_MESSAGE);
             return;
         }
