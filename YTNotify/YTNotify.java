@@ -1,6 +1,14 @@
 import java.awt.AWTException;
 import java.awt.Desktop;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.ItemEvent;
+import java.awt.event.ItemListener;
+import java.awt.event.WindowEvent;
+import java.awt.event.WindowListener;
+import java.awt.GridLayout;
 import java.awt.Image;
+import java.awt.image.BufferedImage;
 import java.awt.Menu;
 import java.awt.MenuItem;
 import java.awt.PopupMenu;
@@ -8,15 +16,13 @@ import java.awt.SystemTray;
 import java.awt.Toolkit;
 import java.awt.TrayIcon;
 import java.awt.TrayIcon.MessageType;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.IOException;
 import java.io.Reader;
 import java.net.ConnectException;
 import java.net.MalformedURLException;
@@ -27,6 +33,10 @@ import java.util.Scanner;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 
 import org.json.simple.*;
@@ -34,7 +44,9 @@ import org.json.simple.parser.JSONParser;
 
 public class YTNotify {
     // TODO: Move settings to separate file.
-    // TODO: Add a delete function.
+    // TODO: Log errors to a file.
+    // TODO: Switch over to Swing JMenu
+    // TODO: Consolidate disk writing into one complete rewrite.
 
     final int MAXMEM = 20; // Maximum amount of updates saved.
     final String NOVIDS = "£No new video£"; // No videos in channel.
@@ -42,6 +54,7 @@ public class YTNotify {
     final int RESULTS = 10;
     final int SHORTDELAY = 10000;
     final int LONGDELAY = 3600000;
+    final int INFMULT = 12;
 
     final int GETVID = 0;
     final int FINDNAME = 1;
@@ -53,9 +66,11 @@ public class YTNotify {
     String apikey;
     String[] linkmem, memids, memnames;
     MenuItem[] linkbtns;
+    SettingsBar sb;
 
     int stack;
     boolean running = true;
+    boolean paused = false;
 
     YTNotify() {
         // Load data from files.
@@ -72,22 +87,43 @@ public class YTNotify {
         try {
             Scanner file = new Scanner(new File("data.txt"));
             ArrayList<String> rawdata = new ArrayList<String>();
-            while(file.hasNext()) rawdata.add(file.nextLine());
+            while(file.hasNext())
+                rawdata.add(file.nextLine());
             file.close();
 
-            for(int i = 0; i < rawdata.size() / 4; i++) {
+            for(int i = 0; i < rawdata.size() / 5; i++) {
                 DataNode newdata = new DataNode();
-                newdata.name = rawdata.get(i * 4);
-                newdata.id = rawdata.get(i * 4 + 1);
-                newdata.ulid = rawdata.get(i * 4 + 2);
-                newdata.lastvid = rawdata.get(i * 4 + 3);
+                newdata.name = rawdata.get(i * 5);
+                newdata.id = rawdata.get(i * 5 + 1);
+                newdata.ulid = rawdata.get(i * 5 + 2);
+                newdata.lastvid = rawdata.get(i * 5 + 3);
+                newdata.inf = rawdata.get(i * 5 + 4).equals("true");
                 data.add(newdata);
+
+                if(!new File("db/" + newdata.id).exists()) {
+                    File dir = new File("db/" + newdata.id);
+                    dir.mkdirs();
+                    JSONObject channeldata = getYTJSON(newdata.id, FINDID);
+                    JSONObject resone = (JSONObject)((JSONArray)channeldata.get("items")).get(0);
+                    JSONObject snippet = (JSONObject)(resone.get("snippet"));
+                    JSONObject thumbs = (JSONObject)(snippet.get("thumbnails"));
+                    Image thumb = null;
+                    try {
+                        URL url = new URL((String)((JSONObject)thumbs.get("default")).get("url"));
+                        thumb = ImageIO.read(url);
+                    } catch(Exception e) {
+                        e.printStackTrace();
+                        System.exit(1);
+                    }
+                    ImageIO.write((BufferedImage)thumb, "png", new File(dir, "thumb.png"));
+                }
             }
         } catch(Exception e) {
             // The data file hasn't been created yet. Just ignore.
             // Or, some file system error happened, in which case there's not much the
             // program can do, anyways.
         }
+        sb = new SettingsBar(this);
 
         // Initialize the update memory.
         linkmem = new String[MAXMEM];
@@ -98,7 +134,8 @@ public class YTNotify {
         try {
             Scanner file = new Scanner(new File("memory.txt"));
             ArrayList<String> rawdata = new ArrayList<String>();
-            while(file.hasNext()) rawdata.add(file.nextLine());
+            while(file.hasNext())
+                rawdata.add(file.nextLine());
             file.close();
 
             for(int i = 0; i < rawdata.size() / 3 && i < MAXMEM; i++) {
@@ -106,7 +143,8 @@ public class YTNotify {
                 memids[i] = rawdata.get(i * 3 + 1);
                 memnames[i] = rawdata.get(i * 3 + 2);
             }
-        } catch(Exception e) {}
+        } catch(Exception e) {
+        }
 
         // Initialize the tray icon.
         tray = SystemTray.getSystemTray();
@@ -146,6 +184,15 @@ public class YTNotify {
         }
 
         // Initialize the other buttons.
+        MenuItem itemChn = new MenuItem("View Channels");
+        itemChn.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if(!sb.isVisible()) sb.changed = false;
+                sb.load(0);
+            }
+        });
+
         MenuItem itemAdd = new MenuItem("Add by Name");
         itemAdd.addActionListener(new ActionListener() {
             @Override
@@ -172,12 +219,13 @@ public class YTNotify {
             @Override
             public void actionPerformed(ActionEvent e) {
                 running = false;
-                Thread.currentThread().interrupt();
+                if(paused) Thread.currentThread().interrupt();
             }
         });
 
         // Add everything to the tray.
         popup.add(memmenu);
+        popup.add(itemChn);
         popup.add(itemAdd);
         popup.add(itemAddID);
         popup.add(itemSearch);
@@ -190,10 +238,15 @@ public class YTNotify {
             running = false;
         }
 
+        int inf = 0;
+        boolean isinf;
         // Main loop
         while(running) {
+            isinf = (inf == 0);
             forloop: for(int i = 0; i < data.size(); i++) {
                 stack = 0;
+
+                if(data.get(i).inf && !isinf) continue;
 
                 // Check for updates.
                 DataNode pos = data.get(i);
@@ -253,11 +306,15 @@ public class YTNotify {
                     e.printStackTrace();
                 }
             }
+            inf++;
+            if(inf == INFMULT) inf = 0;
+            paused = true;
             try {
                 Thread.sleep(LONGDELAY); // Delay between checks.
             } catch(Exception e) {
                 e.printStackTrace();
             }
+            paused = false;
         }
         tray.remove(trayIcon);
     }
@@ -281,6 +338,8 @@ public class YTNotify {
             switch(type) {
             case GETVID:
                 is = new URL("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=" + input + "&maxResults=1&key=" + apikey).openStream();
+                // System.out.println("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId="
+                // + input + "&maxResults=1&key=" + apikey);
                 break;
             case FINDNAME:
                 is = new URL("https://www.googleapis.com/youtube/v3/channels?part=snippet%2CcontentDetails&forUsername=" + input + "&maxResults=1&key=" + apikey).openStream();
@@ -335,6 +394,9 @@ public class YTNotify {
                 writer.write(data.get(i).id + "\n");
                 writer.write(data.get(i).ulid + "\n");
                 writer.write(data.get(i).lastvid + "\n");
+                if(data.get(i).inf) {
+                    writer.write("true\n");
+                } else writer.write("false\n");
             }
             writer.close();
         } catch(IOException e) {
@@ -414,6 +476,13 @@ public class YTNotify {
             JSONObject snip = (JSONObject)vid.get("snippet");
             newdata.lastvid = (String)snip.get("title");
         }
+        File dir = new File("db/" + newdata.id);
+        dir.mkdirs();
+        try {
+            ImageIO.write((BufferedImage)thumb, "png", new File(dir, "thumb.png"));
+        } catch(IOException e) {
+            e.printStackTrace();
+        }
         data.add(newdata);
         saveData();
     }
@@ -440,12 +509,12 @@ public class YTNotify {
         boolean done = false;
         JSONObject snippet = null;
         String chname = "";
+        Image thumb = null;
 
         // Flip through list of results.
         for(int i = 0; i < numresults; i++) {
             snippet = (JSONObject)(((JSONObject)results.get(i)).get("snippet"));
             JSONObject thumbs = (JSONObject)(snippet.get("thumbnails"));
-            Image thumb = null;
             try {
                 URL url = new URL((String)((JSONObject)thumbs.get("default")).get("url"));
                 thumb = ImageIO.read(url);
@@ -505,6 +574,13 @@ public class YTNotify {
             JSONObject snip = (JSONObject)vid.get("snippet");
             newdata.lastvid = (String)snip.get("title");
         }
+        File dir = new File("db/" + newdata.id);
+        dir.mkdirs();
+        try {
+            ImageIO.write((BufferedImage)thumb, "png", new File(dir, "thumb.png"));
+        } catch(IOException e) {
+            e.printStackTrace();
+        }
         data.add(newdata);
         saveData();
     }
@@ -516,4 +592,142 @@ public class YTNotify {
 
 class DataNode {
     String name, id, ulid, lastvid;
+    boolean inf;
+}
+
+class SettingsBar extends JFrame {
+
+    private static final long serialVersionUID = 1L;
+
+    int pos;
+    boolean changed;
+
+    YTNotify here;
+    JLabel titleDT, titleDT2, titleFC;
+    JCheckBox boxFC;
+    JButton boxOP, boxDL, boxPR, boxNX;
+    DataNode data;
+
+    SettingsBar(YTNotify h) {
+        here = h;
+        setLayout(new GridLayout(0, 2, 2, 2));
+        titleDT = new JLabel();
+        titleDT2 = new JLabel();
+        titleFC = new JLabel("Check infrequently");
+
+        boxFC = new JCheckBox();
+        boxFC.addItemListener(new ItemListener() {
+
+            @Override
+            public void itemStateChanged(ItemEvent e) {
+                data.inf = boxFC.isSelected();
+                changed = true;
+            }
+        });
+        boxOP = new JButton("View Channel");
+        boxOP.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                try {
+                    Desktop.getDesktop().browse(new URL("https://www.youtube.com/channel/" + data.id + "/featured").toURI());
+                } catch(Exception e1) {
+                    e1.printStackTrace();
+                }
+            }
+        });
+        boxDL = new JButton("Delete");
+        boxDL.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                Image thumb = null;
+                try {
+                    thumb = ImageIO.read(new File("db/" + data.id + "/thumb.png"));
+                } catch(Exception e1) {
+                    e1.printStackTrace();
+                    return;
+                }
+                int ans = JOptionPane.showConfirmDialog(null, "Really delete " + data.name + "?", "Confirm", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE, new ImageIcon(thumb));
+                if(ans != JOptionPane.YES_OPTION) return;
+                here.data.remove(pos);
+                here.saveData();
+                new File("db/" + data.id).delete();
+                if(here.data.size() == 0) {
+                    setVisible(false);
+                    return;
+                }
+                load(Math.max(pos - 1, 0));
+            }
+        });
+        boxPR = new JButton("<-");
+        boxPR.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                load(pos - 1);
+            }
+        });
+        boxNX = new JButton("->");
+        boxNX.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                load(pos + 1);
+            }
+        });
+        add(titleDT);
+        add(titleDT2);
+        add(titleFC);
+        add(boxFC);
+        add(boxOP);
+        add(boxDL);
+        add(boxPR);
+        add(boxNX);
+        this.addWindowListener(new WindowListener() {
+
+            @Override
+            public void windowOpened(WindowEvent e) {}
+
+            @Override
+            public void windowClosing(WindowEvent e) {
+                if(changed) here.saveData();
+                setVisible(false);
+            }
+
+            @Override
+            public void windowClosed(WindowEvent e) {}
+
+            @Override
+            public void windowIconified(WindowEvent e) {}
+
+            @Override
+            public void windowDeiconified(WindowEvent e) {}
+
+            @Override
+            public void windowActivated(WindowEvent e) {}
+
+            @Override
+            public void windowDeactivated(WindowEvent e) {}
+            
+        });
+		pack();
+        setLocation(800, 450);
+    }
+
+    void load(int npos) {
+        pos = npos;
+        if(here.data.size() == 0) return;
+        if(pos == -1) pos = here.data.size() - 1;
+        if(pos == here.data.size()) pos = 0;
+        data = here.data.get(pos);
+        titleDT.setText(data.name);
+        Image thumb = null;
+        try {
+            thumb = ImageIO.read(new File("db/" + data.id + "/thumb.png"));
+        } catch(Exception e1) {
+            e1.printStackTrace();
+            System.exit(1);
+        }
+        titleDT2.setIcon(new ImageIcon(thumb));
+        boxFC.setSelected(data.inf);
+        pack();
+        setVisible(true);
+    }
 }

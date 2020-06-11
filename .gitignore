@@ -3,6 +3,7 @@
 *.jar
 *.json
 *.bat
+*thumb.png
 
 # DEFAULTS
 
