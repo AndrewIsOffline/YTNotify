@@ -1,4 +1,7 @@
 # YTNotify
+### Important!
+It seems there is a problem with YouTube's API where user playlists aren't always in order. Because the program expects the first item in the playlist to be the latest item, this leads to an issue where the program doesn't report new videos until the first item finally gets changed. I'm working on a solution for this, but it'll take some time to implement. In the meantime, the program is still usable, but sometimes it won't get all the updates.
+
 Get YouTube channel updates on your desktop!
 
 YTNotify is a simple Java application that periodically checks YouTube channels that you specify and notifies you of any updates.
