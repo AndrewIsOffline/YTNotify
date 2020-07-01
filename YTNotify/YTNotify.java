@@ -28,6 +28,7 @@ import java.net.ConnectException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.Charset;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Scanner;
 
@@ -46,7 +47,6 @@ public class YTNotify {
     // TODO: Move settings to separate file.
     // TODO: Log errors to a file.
     // TODO: Switch over to Swing JMenu
-    // TODO: Consolidate disk writing into one complete rewrite.
 
     final int MAXMEM = 20; // Maximum amount of updates saved.
     final String NOVIDS = "£No new video£"; // No videos in channel.
@@ -71,6 +71,7 @@ public class YTNotify {
     int stack;
     boolean running = true;
     boolean paused = false;
+    boolean update;
 
     YTNotify() {
         // Load data from files.
@@ -243,10 +244,10 @@ public class YTNotify {
         // Main loop
         while(running) {
             isinf = (inf == 0);
+            update = false;
             forloop: for(int i = 0; i < data.size(); i++) {
-                stack = 0;
-
                 if(data.get(i).inf && !isinf) continue;
+                stack = 0;
 
                 // Check for updates.
                 DataNode pos = data.get(i);
@@ -265,7 +266,18 @@ public class YTNotify {
                 if(items.size() == 0) {
                     title = NOVIDS;
                 } else {
-                    JSONObject vid = (JSONObject)items.get(0);
+                    Instant[] times = new Instant[items.size()];
+                    for(int j = 0; j < items.size(); j++) {
+                        JSONObject vid = (JSONObject)items.get(j);
+                        JSONObject snip = (JSONObject)vid.get("snippet");
+                        times[j] = Instant.parse((String)snip.get("publishedAt"));
+                    }
+                    int instpos = 0;
+                    for(int j = 1; j < items.size(); j++) {
+                        if(times[instpos].isBefore(times[j])) instpos = j;
+                    }
+
+                    JSONObject vid = (JSONObject)items.get(instpos);
                     JSONObject snip = (JSONObject)vid.get("snippet");
                     JSONObject rid = (JSONObject)snip.get("resourceId");
                     vidid = (String)rid.get("videoId");
@@ -274,6 +286,7 @@ public class YTNotify {
 
                 // Update found!
                 if(!title.equals(pos.lastvid)) {
+                    update = true;
                     trayIcon.displayMessage("New video from " + pos.name, title, MessageType.INFO);
                     pos.lastvid = title;
                     for(int j = MAXMEM - 1; j > 0; j--) {
@@ -286,19 +299,6 @@ public class YTNotify {
                     memids[0] = vidid;
                     memnames[0] = pos.name;
                     linkbtns[0].setLabel("1: " + linkmem[0] + " - " + memnames[0]);
-                    saveData();
-                    try {
-                        BufferedWriter writer = new BufferedWriter(new FileWriter(new File("memory.txt")));
-                        for(int j = 0; j < MAXMEM; j++) {
-                            if(linkmem[j] == null) break;
-                            writer.write(linkmem[j] + "\n");
-                            writer.write(memids[j] + "\n");
-                            writer.write(memnames[j] + "\n");
-                        }
-                        writer.close();
-                    } catch(IOException e) {
-                        e.printStackTrace();
-                    }
                 }
                 try {
                     Thread.sleep(SHORTDELAY); // Spacer between each individual channel check.
@@ -308,6 +308,21 @@ public class YTNotify {
             }
             inf++;
             if(inf == INFMULT) inf = 0;
+            if(update) {
+                saveData();
+                try {
+                    BufferedWriter writer = new BufferedWriter(new FileWriter(new File("memory.txt")));
+                    for(int j = 0; j < MAXMEM; j++) {
+                        if(linkmem[j] == null) break;
+                        writer.write(linkmem[j] + "\n");
+                        writer.write(memids[j] + "\n");
+                        writer.write(memnames[j] + "\n");
+                    }
+                    writer.close();
+                } catch(IOException e) {
+                    e.printStackTrace();
+                }
+            }
             paused = true;
             try {
                 Thread.sleep(LONGDELAY); // Delay between checks.
@@ -337,7 +352,7 @@ public class YTNotify {
         try {
             switch(type) {
             case GETVID:
-                is = new URL("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=" + input + "&maxResults=1&key=" + apikey).openStream();
+                is = new URL("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=" + input + "&maxResults=5&key=" + apikey).openStream();
                 // System.out.println("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId="
                 // + input + "&maxResults=1&key=" + apikey);
                 break;
@@ -713,10 +728,12 @@ class SettingsBar extends JFrame {
 
     void load(int npos) {
         pos = npos;
-        if(here.data.size() == 0) return;
-        if(pos == -1) pos = here.data.size() - 1;
-        if(pos == here.data.size()) pos = 0;
+        int size = here.data.size();
+        if(size == 0) return;
+        if(pos == -1) pos = size - 1;
+        if(pos == size) pos = 0;
         data = here.data.get(pos);
+        setTitle((pos + 1) + " of " + size);
         titleDT.setText(data.name);
         Image thumb = null;
         try {
