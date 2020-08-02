@@ -44,17 +44,18 @@ import org.json.simple.*;
 import org.json.simple.parser.JSONParser;
 
 public class YTNotify {
-    // TODO: Move settings to separate file.
     // TODO: Log errors to a file.
     // TODO: Switch over to Swing JMenu
 
-    final int MAXMEM = 20; // Maximum amount of updates saved.
-    final String NOVIDS = "£No new video£"; // No videos in channel.
-    final String SAFESEARCH = "none";
-    final int RESULTS = 10;
-    final int SHORTDELAY = 10000;
-    final int LONGDELAY = 3600000;
-    final int INFMULT = 12;
+    // "Constants", should not be modified during normal execution except by settings loader
+    int MAXMEM = 20; // Maximum amount of updates saved.
+    String NOVIDS = "£No new video£"; // No videos in channel.
+    String SAFESEARCH = "none";
+    int RESULTS = 10;
+    int SHORTDELAY = 10000;
+    int LONGDELAY = 3600000;
+    int INFMULT = 12;
+    int LISTRESULTS = 10;
 
     final int GETVID = 0;
     final int FINDNAME = 1;
@@ -67,6 +68,7 @@ public class YTNotify {
     String[] linkmem, memids, memnames;
     MenuItem[] linkbtns;
     SettingsBar sb;
+    Thread topthread;
 
     int stack;
     boolean running = true;
@@ -85,6 +87,45 @@ public class YTNotify {
             System.exit(1);
         }
         data = new ArrayList<DataNode>();
+        topthread = Thread.currentThread();
+
+        try {
+            File setfile = new File("settings.txt");
+            if(!setfile.exists()) {
+                BufferedWriter writer = new BufferedWriter(new FileWriter(setfile));
+                writer.write(MAXMEM + " # Max amount of updates saved\n");
+                writer.write(NOVIDS + " # Placeholder string for empty playlist\n");
+                writer.write(SAFESEARCH + " # YouTube safesearch setting\n");
+                writer.write(RESULTS + " # Max number of results displayed per search\n");
+                writer.write(SHORTDELAY + " # Delay between each individual channel check, in milliseconds\n");
+                writer.write(LONGDELAY + " # Delay between checks of all channels, in milliseconds\n");
+                writer.write(INFMULT + " # Delay between checking infrequent channels, in multiples of above value\n");
+                writer.write(LISTRESULTS + " # Number of videos checked in playlist contents\n");
+                writer.close();
+            } else {
+                Scanner file = new Scanner(setfile);
+                ArrayList<String> rawdata = new ArrayList<String>();
+                while(file.hasNext()) {
+                    String line = file.nextLine().split("#")[0].trim();
+                    if(!line.equals("")) rawdata.add(line);
+                }
+                file.close();
+
+                MAXMEM = Integer.parseInt(rawdata.get(0));
+                NOVIDS = rawdata.get(1);
+                SAFESEARCH = rawdata.get(2);
+                RESULTS = Integer.parseInt(rawdata.get(3));
+                SHORTDELAY = Integer.parseInt(rawdata.get(4));
+                LONGDELAY = Integer.parseInt(rawdata.get(5));
+                INFMULT = Integer.parseInt(rawdata.get(6));
+                LISTRESULTS = Integer.parseInt(rawdata.get(7));
+            }
+        } catch(Exception e) {
+            System.out.println("Error reading settings file!");
+            e.printStackTrace();
+            return;
+        }
+
         try {
             Scanner file = new Scanner(new File("data.txt"));
             ArrayList<String> rawdata = new ArrayList<String>();
@@ -220,7 +261,7 @@ public class YTNotify {
             @Override
             public void actionPerformed(ActionEvent e) {
                 running = false;
-                if(paused) Thread.currentThread().interrupt();
+                if(paused) topthread.interrupt();
             }
         });
 
@@ -242,7 +283,7 @@ public class YTNotify {
         int inf = 0;
         boolean isinf;
         // Main loop
-        while(running) {
+        whileloop: while(running) {
             isinf = (inf == 0);
             update = false;
             forloop: for(int i = 0; i < data.size(); i++) {
@@ -300,6 +341,7 @@ public class YTNotify {
                     memnames[0] = pos.name;
                     linkbtns[0].setLabel("1: " + linkmem[0] + " - " + memnames[0]);
                 }
+                if(!running) break whileloop;
                 try {
                     Thread.sleep(SHORTDELAY); // Spacer between each individual channel check.
                 } catch(Exception e) {
@@ -324,6 +366,7 @@ public class YTNotify {
                 }
             }
             paused = true;
+            if(!running) break whileloop;
             try {
                 Thread.sleep(LONGDELAY); // Delay between checks.
             } catch(Exception e) {
@@ -352,7 +395,7 @@ public class YTNotify {
         try {
             switch(type) {
             case GETVID:
-                is = new URL("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=" + input + "&maxResults=5&key=" + apikey).openStream();
+                is = new URL("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=" + input + "&maxResults=" + LISTRESULTS + "&key=" + apikey).openStream();
                 // System.out.println("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId="
                 // + input + "&maxResults=1&key=" + apikey);
                 break;
